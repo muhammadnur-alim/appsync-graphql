@@ -1,0 +1,47 @@
+type Todo {
+  id: ID!
+  name: String!
+  done: Boolean!
+  timestamp: String!
+  deleted: Boolean!
+}
+
+type TodoPullBulk {
+  documents: [Todo]
+  checkpoint: Checkpoint
+}
+
+type Checkpoint {
+  id: String!
+  updatedAt: String!
+}
+
+input CheckpointInput {
+  id: String!
+  updatedAt: String!
+}
+
+input TodoInput {
+  id: ID!
+  name: String!
+  done: Boolean!
+  timestamp: String!
+  deleted: Boolean
+}
+
+input TodoInputPushRow {
+  assumedMasterState: TodoInput
+  newDocumentState: TodoInput!
+}
+
+type Query {
+  pullTodo: TodoPullBulk
+}
+
+type Mutation {
+  pushTodo(rows: [TodoInputPushRow!]!): [Todo]
+}
+
+type Subscription {
+  streamTodo: TodoPullBulk
+}
