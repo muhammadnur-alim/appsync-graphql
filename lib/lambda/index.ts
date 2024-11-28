@@ -1,4 +1,4 @@
-import { MongoClient, Db, Collection, WithId } from "mongodb";
+import { MongoClient, Db } from "mongodb";
 
 interface Todo {
   id: string;
@@ -69,31 +69,6 @@ let lastCheckpoint: Checkpoint = {
   updatedAt: new Date().toISOString(),
 };
 
-const uri = `mongodb+srv://muhammadalim:BbxtygixchoWzcAL@cluster0.57kx0.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
-
-let client: MongoClient;
-let db: Db;
-
-const connectToDatabase = async (dbName: string) => {
-  try {
-    if (!client) {
-      client = new MongoClient(uri);
-      console.log("Connecting to MongoDB...");
-      await client.connect();
-    }
-
-    if (!db) {
-      db = client.db(dbName); // Replace with your database name
-      console.log(`Connected to database: ${dbName}`);
-    }
-
-    return db;
-  } catch (error) {
-    console.error("Failed to connect to MongoDB:", error);
-    throw error;
-  }
-};
-
 exports.handler = async (event: any) => {
   console.log("Received event:", JSON.stringify(event, null, 2));
 
@@ -118,22 +93,6 @@ exports.handler = async (event: any) => {
 };
 
 async function handlePullTodo(checkpoint?: Checkpoint): Promise<TodoPullBulk> {
-  const db = await connectToDatabase("db-graphql-test");
-  const collection: Collection<Omit<Todo, "id">> = db.collection("todos");
-
-  const todosMongoDb: WithId<Omit<Todo, "id">>[] = await collection
-    .find({})
-    .toArray();
-
-  // Map MongoDB documents to the `Todo` type
-  const todos: Todo[] = todosMongoDb.map((doc) => ({
-    id: doc._id.toString(), // Convert ObjectId to string
-    name: doc.name, // TypeScript now knows `name` exists
-    done: doc.done,
-    timestamp: doc.timestamp,
-    deleted: doc.deleted,
-  }));
-
   if (!checkpoint || checkpoint.updatedAt < lastCheckpoint.updatedAt) {
     return {
       documents: todos.filter((todo) => !todo.deleted),
