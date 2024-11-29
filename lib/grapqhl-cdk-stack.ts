@@ -28,9 +28,11 @@ export class GrapqhlCdkStack extends cdk.Stack {
     const todoHandler = new nodejs.NodejsFunction(this, "TodoHandler", {
       runtime: lambda.Runtime.NODEJS_18_X,
       handler: "index.handler",
-      code: lambda.Code.fromAsset("lib/lambda"), // We'll create this file next
-      memorySize: 1024,
-      timeout: cdk.Duration.seconds(30),
+      code: lambda.Code.fromAsset("lambda"),
+      environment: {
+        NODE_ENV: this.node.tryGetContext("env"),
+        MONGODB_URL: process.env.MONGODB_URL!,
+      },
     });
 
     const lambdaDataSource = api.addLambdaDataSource(

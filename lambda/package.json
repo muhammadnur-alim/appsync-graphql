@@ -1,8 +1,8 @@
 {
-  "name": "test-cdk",
+  "name": "lambda",
   "version": "0.1.0",
-  "main": "lambda/index.js",
-  "types": "lambda/index.d.ts",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
   "scripts": {
     "build": "tsc",
     "watch": "tsc -w",
@@ -23,5 +23,8 @@
   },
   "dependencies": {
     "mongodb": "^6.11.0"
-  }
+  },
+  "author": "",
+  "license": "ISC",
+  "description": ""
 }
