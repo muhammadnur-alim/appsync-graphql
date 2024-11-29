@@ -26,12 +26,13 @@ export class GrapqhlCdkStack extends cdk.Stack {
     });
 
     const todoHandler = new nodejs.NodejsFunction(this, "TodoHandler", {
-      runtime: lambda.Runtime.NODEJS_18_X,
+      runtime: lambda.Runtime.NODEJS_20_X,
       handler: "index.handler",
       code: lambda.Code.fromAsset("lambda"),
       environment: {
         NODE_ENV: this.node.tryGetContext("env"),
-        MONGODB_URL: process.env.MONGODB_URL!,
+        MONGODB_URL:
+          "mongodb+srv://muhammadalim:BbxtygixchoWzcAL@cluster0.57kx0.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0",
       },
     });
 

@@ -33,36 +33,6 @@ interface TodoPullBulk {
 
 // In-memory storage for demonstration purposes
 // Replace with actual database in production
-let todos: Todo[] = [
-  {
-    id: "1",
-    name: "Buy groceries",
-    done: false,
-    timestamp: "2024-11-25T10:00:00",
-    deleted: false,
-  },
-  {
-    id: "2",
-    name: "Finish project report",
-    done: true,
-    timestamp: "2024-11-24T15:00:00",
-    deleted: false,
-  },
-  {
-    id: "3",
-    name: "Walk the dog",
-    done: false,
-    timestamp: "2024-11-25T12:30:00",
-    deleted: false,
-  },
-  {
-    id: "4",
-    name: "Clean the house",
-    done: true,
-    timestamp: "2024-11-23T08:00:00",
-    deleted: true,
-  },
-];
 
 let lastCheckpoint: Checkpoint = {
   id: "0",
@@ -71,59 +41,58 @@ let lastCheckpoint: Checkpoint = {
 
 const uri: string =
   "mongodb+srv://muhammadalim:BbxtygixchoWzcAL@cluster0.57kx0.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"; // Replace with your MongoDB URI
-let client: MongoClient;
-let db: Db;
-
-const connectToDatabase = async (): Promise<MongoClient> => {
-  try {
-    if (!client) {
-      client = new MongoClient(uri);
-      console.log("Connecting to MongoDB...");
-      await client.connect();
-    }
-
-    return client;
-  } catch (error) {
-    console.error("Failed to connect to MongoDB:", error);
-    throw error;
-  }
-};
+const uri2: string =
+  "mongodb+srv://dani:4YcgTMImCCPaVwzM@cluster0.olyde.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0";
+const client: MongoClient = new MongoClient(process.env.MONGODB_URL!);
 
 exports.handler = async (event: any) => {
-  console.log("Received event:", JSON.stringify(event, null, 2));
+  // Define the collection with a typed interface
+  try {
+    await client.connect();
+    const db = client.db("db-graphql-test");
+    const collection = db.collection("todos");
 
-  // GraphQL resolvers pass the operation name in info.fieldName
-  const operation = event.info?.fieldName || event.operation;
+    // const db = client.db("db-graphql-test");
+    // const collection = db.collection("todos");
 
-  if (!operation) {
-    throw new Error(`Missing operation - Event: ${JSON.stringify(event)}`);
-  }
+    const operation = event.info?.fieldName || event.operationName;
+    if (!operation) {
+      throw new Error(`Missing operation - Event: ${JSON.stringify(event)}`);
+    }
 
-  // Handle operations
-  switch (operation) {
-    case "pullTodo":
-      return handlePullTodo(event.arguments?.checkpoint || event.checkpoint);
-    case "pushTodo":
-      return handlePushTodo(event.arguments?.rows || event.rows);
-    case "streamTodo":
-      return handleStreamTodo(todos);
-    default:
-      throw new Error(`Unsupported operation: ${operation}`);
+    switch (operation) {
+      case "pullTodo":
+        return await handlePullTodo(
+          collection,
+          event.arguments?.checkpoint || event.checkpoint
+        );
+      case "pushTodo":
+        return await handlePushTodo(
+          collection,
+          event.arguments?.rows || event.rows
+        );
+      case "streamTodo":
+        return handleStreamTodo([]);
+      default:
+        throw new Error(`Unsupported operation: ${operation}`);
+    }
+  } catch (error) {
+    console.error(error);
+    throw error;
+  } finally {
+    await client.close(); // Close the MongoDB connection
   }
 };
 
-async function handlePullTodo(checkpoint?: Checkpoint): Promise<TodoPullBulk> {
-  // Define the collection with a typed interface
-  const client = await connectToDatabase();
-  const db = client.db("db-graphql-test");
-  const collection: Collection<Omit<Todo, "id">> = db.collection("todos");
+async function handlePullTodo(
+  collection: any,
+  checkpoint: any
+): Promise<{ documents: Todo[]; checkpoint: any }> {
+  const limit = 100; // Fetch 100 documents at a time
 
-  const todosMongoDb: WithId<Omit<Todo, "id">>[] = await collection
-    .find({})
-    .toArray();
+  const todosMongoDb = await collection.find({}).limit(limit).toArray();
 
-  // Map MongoDB documents to the `Todo` type
-  const todos: Todo[] = todosMongoDb.map((doc) => ({
+  const todos: Todo[] = todosMongoDb.map((doc: any) => ({
     id: doc._id.toString(),
     name: doc.name,
     done: doc.done,
@@ -131,38 +100,45 @@ async function handlePullTodo(checkpoint?: Checkpoint): Promise<TodoPullBulk> {
     deleted: doc.deleted,
   }));
 
-  if (!checkpoint || checkpoint.updatedAt < lastCheckpoint.updatedAt) {
-    return {
-      documents: todos.filter((todo) => !todo.deleted),
-      checkpoint: lastCheckpoint,
-    };
-  }
-
-  // Return empty list if no changes since checkpoint
   return {
-    documents: [],
-    checkpoint: checkpoint,
+    documents: todos.filter((todo) => !todo.deleted),
+    checkpoint: lastCheckpoint || checkpoint,
   };
 }
 
 async function handlePushTodo(
+  collection: any,
   rows: TodoInputPushRow[]
 ): Promise<Todo[] | null> {
   const conflicts: Todo[] = [];
+  const limit = 100; // Fetch documents in chunks
+  const todosMongoDb = await collection.find({}).limit(limit).toArray();
+
+  // Transform MongoDB documents into Todo objects
+  const todos: Todo[] = todosMongoDb.map((doc: any) => ({
+    id: doc._id.toString(),
+    name: doc.name,
+    done: doc.done,
+    timestamp: doc.timestamp,
+    deleted: doc.deleted || false,
+  }));
 
   for (const row of rows) {
     const { assumedMasterState, newDocumentState } = row;
+
+    // Find an existing todo in the current list
     const existingTodo = todos.find((t) => t.id === newDocumentState.id);
 
     // Check for conflicts
     if (assumedMasterState && existingTodo) {
       if (JSON.stringify(existingTodo) !== JSON.stringify(assumedMasterState)) {
+        // Conflict detected, skip this item
         conflicts.push(existingTodo);
         continue;
       }
     }
 
-    // Update or insert the todo
+    // Create or update the todo
     const newTodo: Todo = {
       id: newDocumentState.id,
       name: newDocumentState.name,
@@ -172,20 +148,30 @@ async function handlePushTodo(
     };
 
     const index = todos.findIndex((t) => t.id === newTodo.id);
+
     if (index >= 0) {
+      // Update existing todo
       todos[index] = newTodo;
+      await collection.updateOne(
+        { _id: newTodo.id },
+        { $set: newTodo },
+        { upsert: true }
+      );
     } else {
+      // Insert new todo
       todos.push(newTodo);
+      await collection.insertOne(newTodo);
     }
 
-    // Update checkpoint
+    // Update checkpoint logic if necessary
     lastCheckpoint = {
       id: newTodo.id,
       updatedAt: new Date().toISOString(),
     };
   }
 
-  return conflicts.length === 0 ? [] : conflicts;
+  // Return conflicts or an empty array if none were found
+  return conflicts.length === 0 ? null : conflicts;
 }
 
 async function handleStreamTodo(todos: Todo[]): Promise<{
