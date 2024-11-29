@@ -32,7 +32,7 @@ export class GrapqhlCdkStack extends cdk.Stack {
       environment: {
         NODE_ENV: this.node.tryGetContext("env"),
         MONGODB_URL:
-          "mongodb+srv://muhammadalim:BbxtygixchoWzcAL@cluster0.57kx0.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0",
+          "mongodb+srv://muhammadalim:@cluster0.57kx0.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0",
       },
     });
 
