@@ -1,4 +1,12 @@
-import { MongoClient, Db, WithId, Collection } from "mongodb";
+import {
+  MongoClient,
+  ObjectId,
+  ChangeStream,
+  ChangeStreamDocument,
+  ChangeStreamInsertDocument,
+  ChangeStreamUpdateDocument,
+} from "mongodb";
+import { todo } from "node:test";
 
 interface Todo {
   id: string;
@@ -31,6 +39,13 @@ interface TodoPullBulk {
   checkpoint?: Checkpoint;
 }
 
+interface PushResponse {
+  conflicts: Todo[];
+  conflictMessage: string;
+  changes: Todo[];
+  changeAction: string[];
+}
+
 // In-memory storage for demonstration purposes
 // Replace with actual database in production
 
@@ -49,7 +64,7 @@ exports.handler = async (event: any) => {
   // Define the collection with a typed interface
   try {
     await client.connect();
-    const db = client.db("db-graphql-test");
+    const db = client.db(process.env.DB_NAME);
     const collection = db.collection("todos");
 
     // const db = client.db("db-graphql-test");
@@ -71,8 +86,6 @@ exports.handler = async (event: any) => {
           collection,
           event.arguments?.rows || event.rows
         );
-      case "streamTodo":
-        return handleStreamTodo([]);
       default:
         throw new Error(`Unsupported operation: ${operation}`);
     }
@@ -84,6 +97,17 @@ exports.handler = async (event: any) => {
   }
 };
 
+// Helper function to transform a MongoDB document into a Todo object
+function transformDocumentToTodo(doc: any): Todo {
+  return {
+    id: doc._id.toString(),
+    name: doc.name,
+    done: doc.done,
+    timestamp: doc.timestamp,
+    deleted: doc.deleted || false,
+  };
+}
+
 async function handlePullTodo(
   collection: any,
   checkpoint: any
@@ -92,13 +116,7 @@ async function handlePullTodo(
 
   const todosMongoDb = await collection.find({}).limit(limit).toArray();
 
-  const todos: Todo[] = todosMongoDb.map((doc: any) => ({
-    id: doc._id.toString(),
-    name: doc.name,
-    done: doc.done,
-    timestamp: doc.timestamp,
-    deleted: doc.deleted,
-  }));
+  const todos: Todo[] = todosMongoDb.map(transformDocumentToTodo);
 
   return {
     documents: todos.filter((todo) => !todo.deleted),
@@ -109,19 +127,15 @@ async function handlePullTodo(
 async function handlePushTodo(
   collection: any,
   rows: TodoInputPushRow[]
-): Promise<Todo[] | null> {
+): Promise<PushResponse | null> {
   const conflicts: Todo[] = [];
+  const changedTodos: Todo[] = [];
+  const changeActions: string[] = [];
   const limit = 100; // Fetch documents in chunks
   const todosMongoDb = await collection.find({}).limit(limit).toArray();
 
   // Transform MongoDB documents into Todo objects
-  const todos: Todo[] = todosMongoDb.map((doc: any) => ({
-    id: doc._id.toString(),
-    name: doc.name,
-    done: doc.done,
-    timestamp: doc.timestamp,
-    deleted: doc.deleted || false,
-  }));
+  const todos: Todo[] = todosMongoDb.map(transformDocumentToTodo);
 
   for (const row of rows) {
     const { assumedMasterState, newDocumentState } = row;
@@ -150,17 +164,43 @@ async function handlePushTodo(
     const index = todos.findIndex((t) => t.id === newTodo.id);
 
     if (index >= 0) {
-      // Update existing todo
-      todos[index] = newTodo;
-      await collection.updateOne(
-        { _id: newTodo.id },
-        { $set: newTodo },
-        { upsert: true }
-      );
+      // Compare the relevant fields to detect actual updates
+      const existing = todos[index];
+
+      const hasChanges =
+        existing.name !== newTodo.name ||
+        existing.done !== newTodo.done ||
+        existing.timestamp !== newTodo.timestamp ||
+        existing.deleted !== newTodo.deleted;
+
+      if (hasChanges) {
+        // Update existing todo if there are changes
+        todos[index] = newTodo;
+        await collection.updateOne(
+          { _id: new ObjectId(newTodo.id) }, // Convert to ObjectId
+          {
+            $set: {
+              name: newTodo.name,
+              done: newTodo.done,
+              timestamp: newTodo.timestamp,
+              deleted: newTodo.deleted,
+            },
+          },
+          { upsert: true }
+        );
+
+        // Record the updated todo and action
+        changedTodos.push(newTodo);
+        changeActions.push(newTodo.deleted ? "delete" : "updated");
+      }
     } else {
-      // Insert new todo
+      // Insert new todo if not found
       todos.push(newTodo);
       await collection.insertOne(newTodo);
+
+      // Record the new todo and action
+      changedTodos.push(newTodo);
+      changeActions.push("inserted");
     }
 
     // Update checkpoint logic if necessary
@@ -171,40 +211,13 @@ async function handlePushTodo(
   }
 
   // Return conflicts or an empty array if none were found
-  return conflicts.length === 0 ? null : conflicts;
-}
-
-async function handleStreamTodo(todos: Todo[]): Promise<{
-  documents: Todo[];
-  checkpoint: { id: string; updatedAt: string };
-}> {
-  // Ensure there's at least one todo in the list to avoid issues with reduce
-  if (todos.length === 0) {
-    return {
-      documents: [],
-      checkpoint: { id: "", updatedAt: "" },
-    };
-  }
-
-  // Map the todos to update their timestamp
-  const newData = todos.map((todo: Todo) => ({
-    ...todo,
-    timestamp: new Date().toISOString(),
-  }));
-
-  // Find the latest todo based on the timestamp
-  const latestTodo = todos.reduce((latest, current) =>
-    new Date(current.timestamp) > new Date(latest.timestamp) ? current : latest
-  );
-
-  // Update the checkpoint with the latest todo's id and timestamp
-  const lastCheckpoint = {
-    id: latestTodo.id,
-    updatedAt: latestTodo.timestamp,
-  };
-
+  // Return PushResponse structure
+  const conflictMessage =
+    conflicts.length > 0 ? "Conflicts detected" : "No conflicts";
   return {
-    documents: newData,
-    checkpoint: lastCheckpoint,
+    conflicts: conflicts.length > 0 ? conflicts : [],
+    conflictMessage,
+    changes: changedTodos,
+    changeAction: changeActions, // Return actions array
   };
 }

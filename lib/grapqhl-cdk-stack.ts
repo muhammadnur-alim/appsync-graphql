@@ -30,8 +30,9 @@ export class GrapqhlCdkStack extends cdk.Stack {
       handler: "index.handler",
       code: lambda.Code.fromAsset("lambda"),
       environment: {
-        NODE_ENV: this.node.tryGetContext("env"),
-        MONGODB_URL: process.env.MONGODB_URL!,
+        MONGODB_URL:
+          "mongodb+srv://muhammadalim:BbxtygixchoWzcAL@cluster0.57kx0.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0",
+        DB_NAME: "db-graphql-test",
       },
     });
 
@@ -49,11 +50,6 @@ export class GrapqhlCdkStack extends cdk.Stack {
     lambdaDataSource.createResolver("CreateTodoResolver", {
       typeName: "Mutation",
       fieldName: "pushTodo",
-    });
-
-    lambdaDataSource.createResolver("StreamTodoResolver", {
-      typeName: "Subscription",
-      fieldName: "streamTodo",
     });
 
     new cdk.CfnOutput(this, "GraphqlTodoApiUrl", {

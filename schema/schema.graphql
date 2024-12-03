@@ -38,10 +38,17 @@ type Query {
   pullTodo: TodoPullBulk
 }
 
+type PushResponse {
+  conflicts: [Todo]
+  conflictMessage: String
+  changes: [Todo]
+  changeAction: [String]
+}
+
 type Mutation {
-  pushTodo(rows: [TodoInputPushRow!]!): [Todo]
+  pushTodo(rows: [TodoInputPushRow!]!): PushResponse!
 }
 
 type Subscription {
-  streamTodo: TodoPullBulk
+  streamTodo: PushResponse @aws_subscribe(mutations: ["pushTodo"])
 }
